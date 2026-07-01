@@ -741,7 +741,7 @@ class MCPClientOAI:
                     
                     # Create a bash command that sets up conda env and runs the script
                     bash_command = (
-                        f"source ~/.bashrc && "
+                        f"source /data/users/pyz/miniforge3/etc/profile.d/conda.sh && "
                         f"conda activate simgen && "
                         f"cd {SERVER_DIR} && "
                         f"export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH && "
@@ -869,6 +869,54 @@ class MCPClientOAI:
         session = server_info['session']
         
         return await session.call_tool(original_tool_name, tool_input)
+
+    @staticmethod
+    def _coerce_text(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            parts = []
+            for item in value:
+                if isinstance(item, dict):
+                    parts.append(
+                        item.get("text")
+                        or item.get("content")
+                        or str(item)
+                    )
+                else:
+                    parts.append(str(item))
+            return "\n".join(part for part in parts if part)
+        return str(value)
+
+    def _extract_assistant_fields(self, message) -> Tuple[str, str, str]:
+        """Return (content, reasoning, text_for_tool_parse) from an API message."""
+        content = self._coerce_text(getattr(message, "content", None))
+
+        reasoning = ""
+        for attr in ("reasoning", "reasoning_content", "thinking"):
+            val = getattr(message, attr, None)
+            if val:
+                reasoning = self._coerce_text(val)
+                break
+
+        if not reasoning:
+            extra = getattr(message, "model_extra", None) or {}
+            for key in ("reasoning", "reasoning_content", "thinking"):
+                if extra.get(key):
+                    reasoning = self._coerce_text(extra[key])
+                    break
+
+        if not reasoning and hasattr(message, "model_dump"):
+            dumped = message.model_dump()
+            for key in ("reasoning", "reasoning_content", "thinking"):
+                if dumped.get(key):
+                    reasoning = self._coerce_text(dumped[key])
+                    break
+
+        parse_source = content if content.strip() else reasoning
+        return content, reasoning, parse_source
     
     def parse_tool_calls_from_content(self, content: str) -> List[Dict[str, Any]]:
         """Parse <tool_call> blocks from Qwen's text output
@@ -1034,14 +1082,14 @@ class MCPClientOAI:
                 call_params = {
                     "model": self.MODEL_NAME,
                     "messages": messages_for_api,
-                    "max_tokens": 40960,
+                    "max_tokens": 32768,
                     "temperature": 1.0,
                 }
                 
                 # Only add tools if we have any
                 if available_tools:
                     call_params["tools"] = available_tools
-                    call_params["tool_choice"] = "none"  # Let the model decide when to use tools
+                    call_params["tool_choice"] = "auto"
                     print(f"🛠️  Available tools: {len(available_tools)}")
                 
                 # Retry mechanism with exponential backoff (for API errors)
@@ -1091,32 +1139,33 @@ class MCPClientOAI:
             # Process the chat completion response
             text_responses = []
             tool_calls = []
-            reasoning_text = None
+            content_text = ""
+            reasoning_text = ""
             
             # Extract the message from response
             try:
                 message = response.choices[0].message
-                
-                # Extract text content
-                if hasattr(message, 'content') and message.content:
-                    text_responses.append(message.content)
-                    print(f"📝 Response content: {len(message.content)} chars")
-                
-                # Extract reasoning if available (Qwen thinking model specific)
-                if hasattr(message, 'reasoning') and message.reasoning:
-                    reasoning_text = message.reasoning
+                content_text, reasoning_text, parse_source = self._extract_assistant_fields(message)
+
+                if content_text.strip():
+                    text_responses.append(content_text)
+                    print(f"📝 Response content: {len(content_text)} chars")
+
+                if reasoning_text.strip():
                     print(f"🧠 Reasoning available: {len(reasoning_text)} chars")
-                
+                    if not content_text.strip():
+                        print("ℹ️  Empty content; using reasoning text for tool-call parsing")
+
                 # Extract tool calls from API response
                 if hasattr(message, 'tool_calls') and message.tool_calls:
                     tool_calls = message.tool_calls
                     print(f"🔧 Found {len(tool_calls)} tool call(s) in API response")
                 
-                # If no tool calls in API response, try parsing from content
-                # (Qwen sometimes formats tool calls as <tool_call> XML tags in content)
-                if not tool_calls and message.content and '<tool_call>' in message.content:
-                    print(f"🔍 No tool calls in API response, parsing from content...")
-                    parsed_tool_calls = self.parse_tool_calls_from_content(message.content)
+                # If no tool calls in API response, try parsing from content/reasoning
+                # (Qwen sometimes formats tool calls as <tool_call> XML tags in text output)
+                if not tool_calls and parse_source and '<tool_call>' in parse_source:
+                    print(f"🔍 No tool calls in API response, parsing from model text...")
+                    parsed_tool_calls = self.parse_tool_calls_from_content(parse_source)
                     if parsed_tool_calls:
                         # Convert parsed dict format to object-like format
                         class ToolCall:
@@ -1139,7 +1188,7 @@ class MCPClientOAI:
                 text_responses.append(f"Error processing response: {str(e)}")
 
             # Display reasoning if available (thinking process)
-            if reasoning_text:
+            if reasoning_text.strip():
                 print(f"\n🧠 Qwen3-VL Reasoning/Thinking:")
                 reasoning_preview = reasoning_text[:500] + "..." if len(reasoning_text) > 500 else reasoning_text
                 print(f"  💭 {reasoning_preview}")
@@ -1147,7 +1196,7 @@ class MCPClientOAI:
             # Build assistant message for logging and history
             assistant_msg = {
                 "role": "assistant",
-                "content": message.content if hasattr(message, 'content') else "",
+                "content": content_text,
                 "timestamp": datetime.now().isoformat(),
                 "iteration": iteration,
                 "has_tool_calls": len(tool_calls) > 0
@@ -1186,7 +1235,12 @@ class MCPClientOAI:
 
             # If no tool calls, we're done
             if not tool_calls:
-                final_response = "\n".join(text_responses) if text_responses else "No response from Qwen3-VL."
+                if text_responses:
+                    final_response = "\n".join(text_responses)
+                elif reasoning_text and reasoning_text.strip():
+                    final_response = reasoning_text
+                else:
+                    final_response = "No response from Qwen3-VL."
                 print(f"✅ Conversation complete after {iteration} iteration(s)")
                 return final_response, intermediate_responses_shown
             

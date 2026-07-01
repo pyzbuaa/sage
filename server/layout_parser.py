@@ -411,8 +411,8 @@ def add_doors_windows_to_floor_plan(current_floor_plan: FloorPlan, doors_windows
 
                         # print(f"window_grid: {window_grid}, glass_color: {glass_color}, frame_color: {frame_color}", file=sys.stderr)
                         
-                        # Generate window material
-                        window_material = window_material_generator.generate_window_material_color_diffusion(
+                        # Generate window material (flux: solid colors; matfuse: diffusion textures)
+                        window_material = window_material_generator.generate_window_material_for_backend(
                             window_grid_xy=window_grid,
                             color_glass=glass_color,
                             color_frame=frame_color

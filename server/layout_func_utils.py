@@ -96,7 +96,6 @@ import glob
 import numpy as np
 from constants import SERVER_ROOT_DIR
 from utils import extract_json_from_response
-from floor_plan_materials.material_generator import material_generate_from_prompt
 from isaaclab.correct_mobile_franka import (
     correct_mobile_franka_standalone,
     robot_task_feasibility_correction_for_room_standalone

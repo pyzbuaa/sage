@@ -1,0 +1,115 @@
+# =============================================================================
+# SAGE 场景生成最小环境 (simgen)
+# =============================================================================
+# 仅包含「场景生成 / 布局 / 渲染 critic / MCP server-client」所需依赖，
+# 不含 Isaac Sim、机器人学习/训练、Matfuse 训练等重型可选组件。
+#
+# 注意:
+#   1. pytorch3d 和 nvdiffrast 必须从源码编译 (匹配 torch 2.5.1+cu124)，
+#      无法通过本 yml 的 pip 段一键装好，请按 INSTALL_simgen.md 第 4 步操作。
+#   2. CUDA 全部钉死在 12.4，避免 conda 解析出 13.x 与 torch(cu124) 冲突。
+#   3. GCC 必须为 13 (CUDA 12.4 的 nvcc 不支持 gcc>13)。
+#   4. Isaac Sim 由用户自行安装，不在此环境内。
+#
+# 用法:
+#   conda env create -f environment_simgen.yml
+#   conda activate simgen
+#   # 然后按 INSTALL_simgen.md 第 4 步编译 pytorch3d / nvdiffrast
+# =============================================================================
+name: simgen
+channels:
+  - conda-forge
+  - nvidia/label/cuda-12.4.1
+dependencies:
+  - python=3.10
+
+  # ---- 约束 CUDA 版本，防止串到 13.x ----
+  - cuda-version=12.4
+
+  # ---- 编译工具链 (源码构建 pytorch3d / nvdiffrast 需要) ----
+  - gcc=13
+  - gxx=13
+  - binutils
+  - sysroot_linux-64=2.17
+
+  # ---- CUDA 12.4 开发组件 ----
+  - cuda-nvcc=12.4
+  - cuda-cudart=12.4
+  - cuda-cudart-dev=12.4
+  - cuda-cccl=12.4
+  - libcusparse-dev
+  - libcublas-dev
+
+  # ---- OpenGL / EGL 开发库 (nvdiffrast GL 后端编译/运行需要) ----
+  - libegl-devel
+  - libgl-devel
+  - libglx-devel
+  - libglvnd-devel
+  - libglu
+  - mesa-libgl-devel-cos7-x86_64
+
+  - pip
+  - pip:
+      # ---- PyTorch GPU 栈 (CUDA 12.4) ----
+      - --extra-index-url https://download.pytorch.org/whl/cu124
+      - torch==2.5.1+cu124
+      - torchvision==0.20.1+cu124
+      - torchaudio==2.5.1+cu124
+
+      # ---- 数值 / 科学计算 (numpy 必须 1.26.x，勿升 2.x) ----
+      - numpy==1.26.4
+      - scipy==1.15.3
+      - scikit-image==0.20.0
+      - scikit-learn==1.7.0
+
+      # ---- 图像 (pillow 钉 9.5.0 兼容旧 API；opencv 用 4.10 兼容 numpy 1.26) ----
+      - pillow==9.5.0
+      - opencv-python==4.10.0.84
+      - imageio==2.37.0
+
+      # ---- 3D 几何 / 网格 / 资产 ----
+      - trimesh==4.8.1
+      - pygltflib==1.16.5
+      - plyfile==1.1.2
+      - xatlas==0.0.11
+      - open3d==0.19.0
+      - shapely==2.1.1
+      - rtree==1.4.1
+      - networkx==3.4.2
+
+      # ---- 可视化 ----
+      - matplotlib==3.10.6
+
+      # ---- 基础模型 / NLP (CLIP + SBERT，权重需联网或 HF 镜像) ----
+      - transformers==4.41.2
+      - tokenizers==0.19.1
+      - huggingface-hub==0.23.4
+      - safetensors==0.6.2
+      - open-clip-torch==2.32.0
+      - sentence-transformers==4.1.0
+      - einops==0.8.1
+      - ftfy==6.3.1
+      - regex==2026.6.28
+
+      # ---- 大模型 API 客户端 (Claude / OpenAI 兼容接口 apiyi / Qwen) ----
+      - anthropic==0.65.0
+      - openai==1.104.1
+      - python-dotenv==1.1.1
+
+      # ---- MCP (server-client 框架，钉 1.10.1 与原工程一致) ----
+      - mcp==1.10.1
+
+      # ---- 杂项工具 ----
+      - compress-json==1.1.1
+      - compress-pickle==2.1.0
+      - requests==2.32.5
+      - tqdm==4.67.1
+      - loguru==0.7.3
+      - iopath
+      - omegaconf
+      - extcolors
+      - Pylette
+
+      # ---- 以下两项无法在此一键安装，须按 INSTALL_simgen.md 第 4 步从源码编译 ----
+      # pytorch3d==0.7.8        (源码编译，匹配 torch 2.5.1+cu124)
+      # nvdiffrast==0.3.3       (源码编译 + 首次运行时 JIT，需 EGL/GL 头文件)

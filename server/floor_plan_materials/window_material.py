@@ -20,15 +20,7 @@ import cv2
 from PIL import Image
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from floor_plan_materials.material_generator import (
-    material_generate_from_prompt, 
-    generate_texture_map_from_prompt_and_sketch, 
-    generate_texture_map_from_prompt_and_sketch_and_image,
-    generate_texture_map_from_prompt_and_color,
-    generate_texture_map_from_prompt_and_color_and_sketch,
-    # generate_texture_map_from_prompt_and_sketch_controlnet
-)
-from constants import SERVER_ROOT_DIR
+from constants import SERVER_ROOT_DIR, MATERIAL_BACKEND
 
 class WindowMaterialGenerator:
     def __init__(self):
@@ -298,6 +290,14 @@ class WindowMaterialGenerator:
             "dimensions": (total_texture_width, total_texture_height)
         }
 
+    def generate_window_material_for_backend(self, window_grid_xy, color_glass, color_frame):
+        """Use MatFuse diffusion textures in matfuse mode; solid colors in flux mode."""
+        if MATERIAL_BACKEND == "matfuse":
+            return self.generate_window_material_color_diffusion(
+                window_grid_xy, color_glass, color_frame
+            )
+        return self.generate_window_material(window_grid_xy, color_glass, color_frame)
+
     def generate_window_material_color_diffusion(self, window_grid_xy, color_glass, color_frame):
         """
         Generate window material with glass and frame regions using color-based texture generation.
@@ -412,7 +412,11 @@ class WindowMaterialGenerator:
         # Right edge strip and bottom edge strip remain as frame regions
 
         # print(f"glass_mask: {glass_mask}", file=sys.stderr)
-        
+
+        from floor_plan_materials.matfuse_loader import (
+            generate_texture_map_from_prompt_and_color,
+        )
+
         # Step 2: Generate glass texture using generate_texture_map_from_prompt_and_color
         glass_texture_pil = generate_texture_map_from_prompt_and_color("glass", color_glass.tolist())
 
@@ -633,6 +637,10 @@ class WindowMaterialGenerator:
         # edge_map_path = f"./vis/edge_map_{prompt.replace(' ', '_')}.png"
         # cv2.imwrite(edge_map_path, full_edge_map)
         # print(f"Saved edge map to {edge_map_path}")
+
+        from floor_plan_materials.matfuse_loader import (
+            generate_texture_map_from_prompt_and_sketch,
+        )
 
         texture_pil = generate_texture_map_from_prompt_and_sketch(prompt, full_edge_map)
         

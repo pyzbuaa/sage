@@ -20,7 +20,7 @@ import os
 import numpy as np
 import pickle
 from PIL import Image
-from constants import RESULTS_DIR
+from constants import RESULTS_DIR, TRELLIS_GENERATION_MAX_WORKERS
 import sys
 import torch
 from pytorch3d.io import save_obj
@@ -201,8 +201,7 @@ def select_objects(object_info_dict: dict, room: Room, existing_objects: List[Ob
     selected_objects = []
     updated_recommendations = []
     
-    # Use ThreadPoolExecutor with maximum 5 threads
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=TRELLIS_GENERATION_MAX_WORKERS) as executor:
         # Submit all tasks and store futures with their corresponding object names to maintain order
         future_to_object_name = {}
         object_names_order = list(object_info_dict.keys())

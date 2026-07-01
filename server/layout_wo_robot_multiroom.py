@@ -96,13 +96,10 @@ import shutil
 from floor_plan_materials.door_material import DoorMaterialSelector
 import glob
 import numpy as np
-from constants import SERVER_ROOT_DIR, PHYSICS_CRITIC_ENABLED, SEMANTIC_CRITIC_ENABLED
+from constants import SERVER_ROOT_DIR, PHYSICS_CRITIC_ENABLED, SEMANTIC_CRITIC_ENABLED, MATERIAL_BACKEND
 from utils import extract_json_from_response
 from floor_plan_materials.flux_generator import (
     generate_image_from_prompt
-)
-from floor_plan_materials.material_generator import (
-    material_generate_from_prompt
 )
 from isaaclab.correct_mobile_franka import (
     correct_mobile_franka_standalone,
@@ -644,7 +641,9 @@ async def select_materials_for_rooms(floor_plan: FloorPlan) -> FloorPlan:
                         texture_map_pil = PILImage.fromarray(np.clip(texture_map_pil_np * 255, 0, 255).astype(np.uint8))
                     return texture_map_pil
 
-                if True:
+                if MATERIAL_BACKEND == "matfuse":
+                    from floor_plan_materials.matfuse_loader import material_generate_from_prompt
+
                     floor_texture_map_pil = material_generate_from_prompt([floor_description])[0]
                     floor_texture_map_pil = repeat_texture(floor_texture_map_pil, 2)
                     room.floor_material = room_id + "_floor"

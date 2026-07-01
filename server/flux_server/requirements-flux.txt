@@ -1,0 +1,12 @@
+# Pinned for torch 2.4.x (diffusers>=0.33 needs newer torch for flash-attn-3 ops)
+diffusers==0.32.2
+transformers>=4.44.0,<5.0
+accelerate>=0.33.0,<2.0
+sentencepiece
+pillow
+flask
+werkzeug
+psutil
+flask-cors
+requests
+huggingface-hub

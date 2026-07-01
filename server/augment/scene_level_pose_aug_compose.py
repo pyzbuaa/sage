@@ -27,7 +27,7 @@ server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, server_dir)
 
 from models import Object, Point3D, Euler, Dimensions
-from floor_plan_materials.material_generator import generate_texture_map_from_prompt_and_color
+from floor_plan_materials.matfuse_loader import generate_texture_map_from_prompt_and_color
 from constants import RESULTS_DIR, SERVER_ROOT_DIR
 # from utils import dict_to_floor_plan
 utils_spec = importlib.util.spec_from_file_location("server_utils", os.path.join(SERVER_ROOT_DIR, "utils.py"))

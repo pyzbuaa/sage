@@ -53,7 +53,7 @@ from objects.object_on_top_placement import (
     get_random_placements_on_target_object, 
     filter_placements_by_physics_critic,
 )
-from floor_plan_materials.material_generator import generate_texture_map_from_prompt_and_color
+from floor_plan_materials.matfuse_loader import generate_texture_map_from_prompt_and_color
 from utils import dict_to_floor_plan
 from constants import RESULTS_DIR
 from dataclasses import asdict

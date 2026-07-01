@@ -20,10 +20,18 @@ by default these will save to `~/.objathor-assets/...`.
 You might need the doors materials and texture coordinates. Link here: https://drive.google.com/file/d/1frgSjaYj7rp_CDcKOVTuvbCl6St1W6Fo/view?usp=drive_link
 
 ### 1.1 Start the TRELLIS Server
-Refer to the startup script of trellis. We hosted with docker on remote cluster.
+
+Use the maintained launcher under `trellis_server/` (defaults to **4 workers** on GPU **4,5,6,7**):
+
 ```bash
-./start_trellis_server.sh
+cd trellis_server
+./setup_trellis_env.sh          # once
+export TRELLIS_GPU_IDS=4,5,6,7  # optional; this is already the default
+CONDA_ENV_NAME=trellis ./start_trellis_server.sh
 ```
+
+`../start_trellis_server.sh` is a thin wrapper to the same script. Do **not** use an old copy that loops over every visible GPU (8 GPUs → 8 workers → OOM).
+
 Huggingface token `HF_TOKEN` is needed for ckpt downloading.
 
 
