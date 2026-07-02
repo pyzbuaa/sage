@@ -1,0 +1,13 @@
+{
+    "ANTHROPIC_API_KEY": "sk-ant-...",
+    "API_TOKEN": "sk-*",
+    "API_URL_QWEN": "https://api.apiyi.com/v1",
+    "API_URL_OPENAI": "https://api.apiyi.com/v1",
+    "MODEL_DICT": {
+        "claude": "claude-sonnet-4-20250514",
+        "openai": "gpt-oss-120b",
+        "qwen": "qwen3-vl-30b-a3b-thinking"
+    },
+    "TRELLIS_SERVER_URL": "http://172.23.53.209:8080",
+    "FLUX_SERVER_URL": "http://localhost:8090"
+}

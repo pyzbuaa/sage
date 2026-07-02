@@ -1,5 +1,5 @@
 {
-    "API_TOKEN": "",
-    "API_URL_QWEN": "",
-    "MODEL_NAME": "Qwen3-VL-32B-Thinking"
+    "API_TOKEN": "sk-*",
+    "API_URL_QWEN": "https://api.apiyi.com/v1",
+    "MODEL_NAME": "qwen3-vl-32b-thinking"
 }
