@@ -65,7 +65,9 @@ for schema_lib in "${ISAACSIM_PATH}"/exts/omni.usd.schema.isaac/plugins/*/lib; d
     fi
 done
 
-export LD_LIBRARY_PATH="${ISAAC_LIB_PATHS}:${LD_LIBRARY_PATH}"
+# Append the active conda env lib dir LAST so Isaac/system libs win, and only
+# gap libraries (e.g. libGLU.so.1, missing system-wide) are picked up from conda.
+export LD_LIBRARY_PATH="${ISAAC_LIB_PATHS}:${LD_LIBRARY_PATH}:${CONDA_PREFIX}/lib"
 
 # Override Python executable to use conda python
 export PYTHONEXE="$(which python)"

@@ -95,6 +95,7 @@ from floor_plan_materials.door_material import DoorMaterialSelector
 import glob
 import numpy as np
 from constants import SERVER_ROOT_DIR, PHYSICS_CRITIC_ENABLED, SEMANTIC_CRITIC_ENABLED, MATERIAL_BACKEND
+from constants import VLN_MODE, VLN_MAX_OBJECTS, VLN_MAX_ONTOP_PER_SURFACE
 from utils import extract_json_from_response
 from floor_plan_materials.flux_generator import (
     generate_image_from_prompt
@@ -1140,6 +1141,41 @@ def generate_scene_requirements(input_text: str) -> str:
     overall_reasoning = []
     
             
+    if VLN_MODE:
+        proposals_target_line = (
+            f"3. Object placement proposals listed by importance from high to low, "
+            f"with about {min(8, VLN_MAX_OBJECTS)}-{VLN_MAX_OBJECTS} diverse LANDMARK object types covering:"
+        )
+        detail_requirement_line = (
+            f"   - This scene is for Vision-and-Language Navigation (VLN). Prioritize LARGE, visually distinct, "
+            f"easily-referable landmark furniture (e.g. bed, sofa, dining table, cabinet, wardrobe, desk, "
+            f"refrigerator, TV) that a navigation instruction could point to.\n"
+            f"   - Keep floors clear and walkable. Do NOT densely fill shelves or surfaces with small clutter.\n"
+            f"   - Propose at most {VLN_MAX_ONTOP_PER_SURFACE} salient on-top object per supporting furniture, "
+            f"and only when it makes the furniture more recognizable as a navigation target.\n"
+            f"   - Keep the TOTAL number of object proposals at or below {VLN_MAX_OBJECTS}."
+        )
+        realism_line = (
+            "Object proposals should keep the room recognizable, functional and navigable, "
+            "not densely decorated."
+        )
+        final_count_line = (
+            f"Generate about {min(8, VLN_MAX_OBJECTS)}-{VLN_MAX_OBJECTS} diverse LANDMARK object proposals "
+            f"(hard cap: {VLN_MAX_OBJECTS}). Fewer, larger, clearly-referable objects are strongly preferred."
+        )
+    else:
+        proposals_target_line = (
+            "3. Object placement proposals listed by the importance from high to low "
+            "with at least 20 diverse types of objects covering:"
+        )
+        detail_requirement_line = (
+            "   - Object proposals should include all necessary large and small items. Has rich details. "
+            "Each shelf is full of objects (>5) inside. Each supporter (e.g. table, desk, and shelf) "
+            "has small objects on it."
+        )
+        realism_line = "Object proposals should add the realism, functionality, completeness and diversity to the room."
+        final_count_line = "Generate at least 20 diverse object proposals."
+
     prompt = f"""You are an interior design expert. Based on the room description, generate comprehensive scene requirements.
 
 ROOM DESCRIPTION: {input_text}
@@ -1147,7 +1183,7 @@ ROOM DESCRIPTION: {input_text}
 TASK: Generate initial scene requirements following the room description and including:
 1. Room size description (e.g., large-sized, medium-sized, compact)
 2. Explicit decoration style (should be style similar to modern and bright)
-3. Object placement proposals listed by the importance from high to low with at least 20 diverse types of objects covering:
+{proposals_target_line}
    - Essential furniture (placed on floor)
    - Background objects (placed on floor or wall)
    - Decorative/functional objects (placed on top of furniture surfaces)
@@ -1156,9 +1192,9 @@ TASK: Generate initial scene requirements following the room description and inc
    (e.g. when the room is large sized, you need to propose more objects types and quantity accordingly than normally needed.)
    - Object type proposals should not be odd or unrealistic or uncommon or weird. should be believable, and common daily objects make the room feel lived-in. Rich of daily furniture and objects.
    - Object proposals should include the necessary furniture and setup for the specified function.
-   - Object proposals should include all necessary large and small items. Has rich details. Each shelf is full of objects (>5) inside. Each supporter (e.g. table, desk, and shelf) has small objects on it.
+{detail_requirement_line}
 
-Object proposals should add the realism, functionality, completeness and diversity to the room.
+{realism_line}
 
 OBJECT RESTRICTIONS:
 DO NOT propose: doors, windows (does not belong to the objects to be proposed)
@@ -1210,7 +1246,7 @@ REQUIRED JSON RESPONSE:
 [IMPORTANT FOR THE RESPONSE]
 - object_proposals should be sorted by the sequence in object_importance_reasoning, from high to low importance.
 
-Generate at least 20 diverse object proposals."""
+{final_count_line}"""
 
     # Call VLM
     try:
@@ -1254,7 +1290,37 @@ Generate at least 20 diverse object proposals."""
         
     except Exception as e:
         print(f"⚠️ Warning: Failed to generate scene requirements: {e}", file=sys.stderr)
-        
+
+    # VLN mode: enforce a lean, navigation-friendly set of proposals as a
+    # safety net in case the model ignores the prompt-level caps. We keep large
+    # landmark furniture (floor/wall) first, then allow at most
+    # VLN_MAX_ONTOP_PER_SURFACE on-top object per supporting surface, and finally
+    # cap the total number of proposals to VLN_MAX_OBJECTS.
+    if VLN_MODE and all_object_proposals:
+        before_count = len(all_object_proposals)
+        floor_wall = [p for p in all_object_proposals
+                      if p.get("object_placement") in ("floor", "wall")]
+        ontop = [p for p in all_object_proposals
+                 if p.get("object_placement") not in ("floor", "wall")]
+
+        # Limit on-top objects per supporting surface.
+        ontop_kept = []
+        ontop_per_surface: Dict[str, int] = {}
+        for obj in ontop:
+            surface = str(obj.get("object_placement", "surface"))
+            if ontop_per_surface.get(surface, 0) < VLN_MAX_ONTOP_PER_SURFACE:
+                ontop_kept.append(obj)
+                ontop_per_surface[surface] = ontop_per_surface.get(surface, 0) + 1
+
+        # Proposals are already sorted by importance; keep that order overall
+        # while prioritizing landmark furniture, then cap the total.
+        trimmed = (floor_wall + ontop_kept)[:VLN_MAX_OBJECTS]
+        all_object_proposals = trimmed
+        print(
+            f"🧭 VLN_MODE: trimmed object proposals {before_count} -> {len(all_object_proposals)} "
+            f"(max_objects={VLN_MAX_OBJECTS}, max_ontop_per_surface={VLN_MAX_ONTOP_PER_SURFACE})",
+            file=sys.stderr,
+        )
 
     # Transform the collected data into a natural language paragraph
     # Ensure room_type has a fallback value
@@ -1341,25 +1407,37 @@ Generate at least 20 diverse object proposals."""
                     scene_requirements += ". "
         
         # Add furniture surface requirements
-        scene_requirements += f"Each furniture surface such as tables, desks, shelves, and cabinets should have at least 2 or more decorative or functional objects placed on top to create a lived-in, realistic environment. "
+        if VLN_MODE:
+            scene_requirements += f"This scene is for Vision-and-Language Navigation (VLN): prioritize large, visually distinct, easily-referable landmark furniture and keep floors clear and walkable. Place at most {VLN_MAX_ONTOP_PER_SURFACE} salient object on any furniture surface, and only when it helps identify the furniture as a navigation target. Do NOT fill shelves or surfaces with small clutter. "
+        else:
+            scene_requirements += f"Each furniture surface such as tables, desks, shelves, and cabinets should have at least 2 or more decorative or functional objects placed on top to create a lived-in, realistic environment. "
         
         # Add constraints
         scene_requirements += f"Important constraints: Do not add rugs, mats, carpets, curtains, blankets, ceiling-hanging objects, or ceiling objects to the scene as these are either already installed or restricted. "
         
-        # Add minimum required objects count
-        scene_requirements += f"The complete scene must contain a minimum of {len(all_object_proposals)} objects total following the placement proposals described above to achieve a complete, diverse, and realistic room environment."
+        # Add required objects count
+        if VLN_MODE:
+            scene_requirements += f"The complete scene should contain about {len(all_object_proposals)} objects total (keep it lean; do not exceed {VLN_MAX_OBJECTS}) following the placement proposals described above to achieve a recognizable, functional, and navigable room environment."
+        else:
+            scene_requirements += f"The complete scene must contain a minimum of {len(all_object_proposals)} objects total following the placement proposals described above to achieve a complete, diverse, and realistic room environment."
         
         scene_requirements += f"Must ensure that: "
         scene_requirements += f"i. The layout (position, rotation, and size) is believable, and common daily objects make the room feel lived-in. Rich of daily furniture and objects."
         scene_requirements += f"ii. Contains the necessary furniture and setup for the specified function."
         scene_requirements += f"iii. Each objects is in **reasonable size**, neatly placed, objects of the same category are well aglined, relationships are reasonable (e.g., chairs face desks), sufficient space exists for walking, and **orientations must** be correct. "
-        scene_requirements += f"iv. All necessary large and small items are present. Has rich details. Each shelf is full of objects (>5) inside. Each supporter (e.g. table, desk, and shelf) has small objects on it. The room feels done."
+        if VLN_MODE:
+            scene_requirements += f"iv. All key landmark furniture is present and clearly recognizable. Floors stay clear and walkable for navigation. Surfaces are NOT densely decorated."
+        else:
+            scene_requirements += f"iv. All necessary large and small items are present. Has rich details. Each shelf is full of objects (>5) inside. Each supporter (e.g. table, desk, and shelf) has small objects on it. The room feels done."
 
         scene_requirements += f"Must avoid that: "
         scene_requirements += f"i. Unusual objects or strange placements make the room unrealistic."
         scene_requirements += f"ii. Missing key objects or contains mismatched furniture (e.g., no bed in a bedroom)."
         scene_requirements += f"iii. Floating objects, crowded floor, **abnormal size**, objects with collision, incorrect **orientation**, or large items placed oddly (e.g., sofa not against the wall). Large empty space. Blocker in front of furniture."
-        scene_requirements += f"iv. Room is sparse or empty, lacks decor or key elements."
+        if VLN_MODE:
+            scene_requirements += f"iv. Room is missing its key landmark furniture, or floors/walkways are blocked by clutter."
+        else:
+            scene_requirements += f"iv. Room is sparse or empty, lacks decor or key elements."
 
     print(f"✅ Scene requirements generated: {len(scene_requirements)} characters, {len(all_object_proposals)} object proposals", file=sys.stderr)
     return scene_requirements

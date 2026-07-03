@@ -61,6 +61,33 @@ from typing import Dict, Any, List, Optional, Union
 from omni.isaac.nucleus import get_assets_root_path
 from omni.isaac.core.prims import XFormPrim
 import numpy as np
+
+# Compatibility shim: the scene pkl files (e.g. *_tex_coords.pkl) may be pickled
+# by numpy>=2.0 (which stores arrays under the "numpy._core" module), while the
+# Isaac Sim runtime ships numpy 1.26 (which only has "numpy.core"). Redirect any
+# "numpy._core[.*]" import to the legacy "numpy.core[.*]" so those pickles load.
+if not hasattr(np, "_core"):
+    import importlib as _importlib
+    import importlib.abc as _importlib_abc
+    import importlib.util as _importlib_util
+
+    class _NumpyCoreCompatFinder(_importlib_abc.MetaPathFinder, _importlib_abc.Loader):
+        _prefix = "numpy._core"
+
+        def find_spec(self, name, path=None, target=None):
+            if name == self._prefix or name.startswith(self._prefix + "."):
+                return _importlib_util.spec_from_loader(name, self)
+            return None
+
+        def create_module(self, spec):
+            legacy_name = "numpy.core" + spec.name[len(self._prefix):]
+            return _importlib.import_module(legacy_name)
+
+        def exec_module(self, module):
+            pass
+
+    sys.meta_path.insert(0, _NumpyCoreCompatFinder())
+
 from omni.isaac.core import World
 # Import Beaver3d and USDLoader
 from isaac_sim_mcp_extension.gen3d import Beaver3d
@@ -135,7 +162,9 @@ if os.path.islink(isaac_ext_dir):
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(isaac_ext_dir))))
 
 # from constants import SERVER_ROOT_DIR
-SERVER_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(isaac_ext_dir)))
+SERVER_ROOT_DIR = os.path.dirname(os.path.dirname(isaac_ext_dir))
+if os.path.basename(SERVER_ROOT_DIR) != "server" and os.path.isdir(os.path.join(SERVER_ROOT_DIR, "server")):
+    SERVER_ROOT_DIR = os.path.join(SERVER_ROOT_DIR, "server")
 
 # Extension Methods required by Omniverse Kit
 # Any class derived from `omni.ext.IExt` in top level module (defined in `python.modules` of `extension.toml`) will be

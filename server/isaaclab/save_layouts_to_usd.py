@@ -98,5 +98,5 @@ async def test_load_layout(layout_id: str):
 if __name__ == "__main__":
     # Run the test
     parser = argparse.ArgumentParser()
-    layout_id = "layout_a669ed6f"
+    layout_id = "layout_d40e39d9"
     asyncio.run(test_load_layout(layout_id))

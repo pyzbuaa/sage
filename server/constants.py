@@ -33,7 +33,29 @@ SEMANTIC_CRITIC_ENABLED = os.environ.get("SEMANTIC_CRITIC_ENABLED", "true").lowe
 # Should match the number of TRELLIS worker GPUs (one in-flight job per GPU).
 TRELLIS_GENERATION_MAX_WORKERS = int(os.environ.get("TRELLIS_GENERATION_MAX_WORKERS", "4"))
 
+# Per-request timeout (seconds) for server-side LLM/VLM calls (OpenAI/Anthropic).
+# On timeout the call raises, and vlm.py's backoff retry re-issues it. Without an
+# explicit timeout the SDK default (~600s) makes a stalled gateway hang for many
+# minutes, which is the main cause of the pipeline appearing "stuck".
+LLM_REQUEST_TIMEOUT = float(os.environ.get("LLM_REQUEST_TIMEOUT", "180"))
+
+# VLN (Vision-and-Language Navigation) oriented generation.
+# When enabled, the scene focuses on large, referable landmark furniture and
+# keeps only a few salient surface objects, instead of densely filling every
+# shelf/surface with small clutter. Each object costs a full TRELLIS generation
+# (1-5 min), so this dramatically speeds up generation and keeps floors walkable.
+VLN_MODE = os.environ.get("VLN_MODE", "true").lower() == "true"
+# Upper bound on total object proposals for a room in VLN mode.
+VLN_MAX_OBJECTS = int(os.environ.get("VLN_MAX_OBJECTS", "12"))
+# Max number of on-top (surface) objects allowed per supporting furniture in VLN mode.
+VLN_MAX_ONTOP_PER_SURFACE = int(os.environ.get("VLN_MAX_ONTOP_PER_SURFACE", "1"))
+
 print(f"MATERIAL_BACKEND: {MATERIAL_BACKEND}", file=sys.stderr)
+print(f"LLM_REQUEST_TIMEOUT: {LLM_REQUEST_TIMEOUT}", file=sys.stderr)
 print(f"PHYSICS_CRITIC_ENABLED: {PHYSICS_CRITIC_ENABLED}", file=sys.stderr)
 print(f"SEMANTIC_CRITIC_ENABLED: {SEMANTIC_CRITIC_ENABLED}", file=sys.stderr)
 print(f"TRELLIS_GENERATION_MAX_WORKERS: {TRELLIS_GENERATION_MAX_WORKERS}", file=sys.stderr)
+print(f"VLN_MODE: {VLN_MODE}", file=sys.stderr)
+if VLN_MODE:
+    print(f"VLN_MAX_OBJECTS: {VLN_MAX_OBJECTS}", file=sys.stderr)
+    print(f"VLN_MAX_ONTOP_PER_SURFACE: {VLN_MAX_ONTOP_PER_SURFACE}", file=sys.stderr)

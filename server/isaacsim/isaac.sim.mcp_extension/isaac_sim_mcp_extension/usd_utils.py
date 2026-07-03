@@ -38,6 +38,10 @@ def convert_mesh_to_usd(stage, usd_internal_path, verts, faces, collision_approx
     vertex_counts = np.ones(n_faces).astype(np.int32) * 3
 
     mesh = UsdGeom.Mesh.Define(stage, usd_internal_path)
+    # Export as a polygonal mesh, not a Catmull-Clark subdivision surface.
+    # Leaving the default (catmullClark) makes Omniverse/Isaac RTX mishandle the
+    # faceVarying "st" UVs on dense meshes, so object textures don't render.
+    mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
 
     mesh.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(points))
     # mesh.CreateDisplayColorPrimvar("vertex")
@@ -242,6 +246,10 @@ def convert_mesh_to_usd_simple(stage, usd_internal_path, verts, faces, collision
     vertex_counts = np.ones(n_faces).astype(np.int32) * 3
 
     mesh = UsdGeom.Mesh.Define(stage, usd_internal_path)
+    # Export as a polygonal mesh, not a Catmull-Clark subdivision surface.
+    # Leaving the default (catmullClark) makes Omniverse/Isaac RTX mishandle the
+    # faceVarying "st" UVs on dense meshes, so object textures don't render.
+    mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
 
     mesh.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(points))
     # mesh.CreateDisplayColorPrimvar("vertex")
@@ -460,6 +468,7 @@ def door_frame_to_usd(
     
     # Create door frame mesh
     frame_mesh = UsdGeom.Mesh.Define(stage, usd_internal_path_door_frame)
+    frame_mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
     frame_mesh.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(frame_verts))
     frame_mesh.CreateFaceVertexCountsAttr(Vt.IntArray.FromNumpy(frame_vertex_counts))
     frame_mesh.CreateFaceVertexIndicesAttr(Vt.IntArray.FromNumpy(frame_faces))
@@ -525,6 +534,7 @@ def door_frame_to_usd(
     
     # Create door mesh
     door_mesh = UsdGeom.Mesh.Define(stage, usd_internal_path_door)
+    door_mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
     door_mesh.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(door_verts))
     door_mesh.CreateFaceVertexCountsAttr(Vt.IntArray.FromNumpy(door_vertex_counts))
     door_mesh.CreateFaceVertexIndicesAttr(Vt.IntArray.FromNumpy(door_faces))

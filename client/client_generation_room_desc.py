@@ -81,7 +81,136 @@ SERVER_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'serv
 
 load_dotenv()  # load environment variables from .env
 
+# VLN (Vision-and-Language Navigation) oriented generation. When enabled, the
+# agent places only large, referable landmark furniture plus a few salient
+# objects, instead of densely filling every surface with small clutter. Each
+# placed object triggers a full TRELLIS 3D generation (1-5 min), so this keeps
+# scenes fast to build and floors walkable. Keep in sync with server constants.
+VLN_MODE = os.environ.get("VLN_MODE", "true").lower() == "true"
+VLN_MAX_OBJECTS = int(os.environ.get("VLN_MAX_OBJECTS", "12"))
+VLN_MAX_ONTOP_PER_SURFACE = int(os.environ.get("VLN_MAX_ONTOP_PER_SURFACE", "1"))
+
+def get_task_definition_text_vln(room_desc: str):
+    return f"""
+Task: Generate a room based on the following room description: {room_desc}.
+
+=== OVERVIEW ===
+
+You are generating a scene for Vision-and-Language Navigation (VLN). The goal is a
+room that is easy to navigate and describe, NOT a densely decorated showroom.
+Every object you place is expensive to generate, so keep the scene LEAN.
+
+The process involves two main steps:
+1. Generate the room layout
+2. Place a small set of large, referable landmark objects
+
+=== STEP 1: GENERATE ROOM LAYOUT ===
+
+Generate the room layout first. You must generate ONLY a single room.
+
+[CRITICAL] When calling the layout generation tool, explicitly mention "a single room" without mentioning any other rooms or spaces.
+
+The layout generation will return scene requirements containing recommended objects and style information. In VLN mode these requirements are already trimmed to a lean set of landmark objects; follow them but keep the scene minimal.
+
+=== STEP 2: PLACE LANDMARK OBJECTS ===
+
+--- 2.1 PLACEMENT STRATEGY (VLN) ---
+
+Place objects in this priority order and STOP early:
+
+STAGE 1: Large, Key Landmark Furniture (Highest Priority)
+- Place the major furniture that defines the room: bed, sofa, dining table, desk, cabinets, wardrobe, counters, large appliances, TV.
+- These are the elements a navigation instruction would refer to ("walk to the sofa", "go to the desk").
+- Think about spatial relationships and keep clear, walkable floor space between them.
+
+STAGE 2: Essential Functional Companions
+- Add only objects that are functionally required and visually significant, e.g. chairs with a dining table.
+- Do NOT add isolated decorative filler.
+
+STAGE 3 (OPTIONAL, MINIMAL): A Few Salient Surface Objects
+- Place at most {VLN_MAX_ONTOP_PER_SURFACE} salient object per furniture surface, and ONLY when it makes the furniture a clearer navigation landmark (e.g. a lamp on a desk, a plant on a table).
+- [CRITICAL] Do NOT fill shelves. Do NOT put small clutter on every surface. Leave most surfaces empty.
+
+--- 2.2 PLACEMENT SOURCES ---
+
+SOURCE 1: Scene Requirements (from layout generation) - your primary reference (already trimmed for VLN).
+SOURCE 2: If placement fails, RETRY ONCE; if it keeps failing, skip it and move on. Do not obsess over filling space.
+
+--- 2.3 PLACEMENT CONSTRAINTS ---
+
+[CRITICAL] Keep the TOTAL number of placed objects at or below {VLN_MAX_OBJECTS}.
+[CRITICAL] Maximum 35-40 objects per single placement call (you will rarely need this many).
+[ENCOURAGED] Place multiple object types in a single call for efficiency.
+
+FORBIDDEN OBJECTS:
+[CRITICAL] NEVER add: rugs, mats, curtains, blankets, ceiling-hanging objects (already installed).
+
+REPLACEMENT WARNING:
+[CRITICAL] NEVER use "replace all objects" - this removes everything you've placed.
+
+--- 2.4 STYLE CONSISTENCY ---
+
+[IMPORTANT] All placed objects must match the style specified in the scene requirements, and mention the style when placing them.
+
+--- 2.5 OBJECT IDs ---
+
+[IMPORTANT] Pay attention to place_id and object_id values, and use exact object_id values when referencing existing objects.
+
+--- 2.6 QUALITY REQUIREMENTS (VLN) ---
+
+✓ NAVIGABILITY:
+- Ample clear, walkable floor space; no blockers in front of furniture or doorways.
+- Correct positions, rotations, and sizes; correct orientations (e.g. chairs face the table).
+
+✓ RECOGNIZABILITY:
+- All key landmark furniture for this room type is present and clearly identifiable.
+- Objects are believable and common; no strange or unrealistic placements.
+
+✗ AVOID:
+- Densely decorated surfaces or full shelves.
+- Crowded floors, floating objects, collisions, abnormal sizes, wrong orientations.
+- Small clutter that adds no navigation value.
+
+--- 2.7 WHEN TO STOP (VLN COMPLETION CHECKLIST) ---
+
+STOP as soon as ALL of the following are met (do not keep adding objects):
+
+□ CONDITION 1: All key landmark furniture for this room type is present.
+□ CONDITION 2: Essential functional companions (e.g. chairs for a dining table) are placed.
+□ CONDITION 3: Floors and walkways are clear and navigable.
+□ CONDITION 4: Total placed objects is at or below {VLN_MAX_OBJECTS}.
+
+[CRITICAL] Once these are met, STOP. Prefer stopping early over adding more objects.
+
+=== PLACEMENT LOCATION SPECIFICATION ===
+
+When placing objects, specify the location using ONE of three types:
+
+--- TYPE 1: "floor" ---
+Use "floor" for objects that rest on the ground, including objects against walls, in corners, or beside/next to/in front of other floor objects.
+
+--- TYPE 2: "wall" ---
+Use "wall" ONLY for objects physically mounted on the wall surface, above floor level (pictures, wall-mounted TV, wall-mounted shelf).
+
+--- TYPE 3: "object_id" or "estimated_object_name" ---
+Use object references ONLY for objects placed on top of another existing object. Prefer "object_id" when known; otherwise "estimated_object_name".
+
+[CRITICAL] "on top of" → use object_id/estimated_object_name; "beside/next to/in front of/behind" → use "floor".
+
+--- PLACEMENT FORMAT ---
+
+"place [quantity] [object_type] [description] on [location (floor|wall|object_id)], [extra guidance]"
+
+Example:
+"place 1 dining table wooden on floor, centered in the room"
+"place 4 dining chair wooden on floor, facing the table"
+"place 1 wall-mounted TV modern on wall, facing the sofa"
+
+"""
+
 def get_task_definition_text(room_desc: str):
+    if VLN_MODE:
+        return get_task_definition_text_vln(room_desc)
     return f"""
 Task: Generate a room based on the following room description: {room_desc}.
 
@@ -429,7 +558,9 @@ class MCPClientOAI:
         
         # Initialize tool call tracking
         self.tool_call_count = 0
-        self.max_tool_calls = 15
+        # VLN scenes are lean, so fewer placement rounds are needed. This also
+        # prevents the agent from over-populating the room with small objects.
+        self.max_tool_calls = 8 if VLN_MODE else 15
 
     def _generate_log_filename(self) -> str:
         """Generate a timestamped log filename"""
@@ -751,6 +882,9 @@ class MCPClientOAI:
                         f"export SLURM_JOB_ID={os.environ.get('SLURM_JOB_ID')} && "
                         f"export PHYSICS_CRITIC_ENABLED={os.environ.get('PHYSICS_CRITIC_ENABLED', 'true')} && "
                         f"export SEMANTIC_CRITIC_ENABLED={os.environ.get('SEMANTIC_CRITIC_ENABLED', 'true')} && "
+                        f"export VLN_MODE={os.environ.get('VLN_MODE', 'true')} && "
+                        f"export VLN_MAX_OBJECTS={os.environ.get('VLN_MAX_OBJECTS', '12')} && "
+                        f"export VLN_MAX_ONTOP_PER_SURFACE={os.environ.get('VLN_MAX_ONTOP_PER_SURFACE', '1')} && "
                         f"export SLURM_JOB_ID={os.environ.get('SLURM_JOB_ID')} && "
                         f"python {abs_script_path}"
                     )
@@ -1082,7 +1216,9 @@ class MCPClientOAI:
                 call_params = {
                     "model": self.MODEL_NAME,
                     "messages": messages_for_api,
-                    "max_tokens": 32768,
+                    # gpt-4o-mini caps completion at 16384; keep <= that to avoid 400s.
+                    # Qwen models accept this too.
+                    "max_tokens": 16384,
                     "temperature": 1.0,
                 }
                 

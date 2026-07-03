@@ -31,8 +31,8 @@ print("isaac_ext_dir:", isaac_ext_dir)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(isaac_ext_dir))))
 
 # from constants import SERVER_ROOT_DIR
-SERVER_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(isaac_ext_dir)))
-if os.path.basename(SERVER_ROOT_DIR) == "main":
+SERVER_ROOT_DIR = os.path.dirname(os.path.dirname(isaac_ext_dir))
+if os.path.basename(SERVER_ROOT_DIR) != "server" and os.path.isdir(os.path.join(SERVER_ROOT_DIR, "server")):
     SERVER_ROOT_DIR = os.path.join(SERVER_ROOT_DIR, "server")
 print("SERVER_ROOT_DIR:", SERVER_ROOT_DIR)
 

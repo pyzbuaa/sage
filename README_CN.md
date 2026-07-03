@@ -143,7 +143,10 @@ export PHYSICS_CRITIC_ENABLED=false   # 无 Isaac Sim 时建议关闭
 export SEMANTIC_CRITIC_ENABLED=false
 export HF_HUB_OFFLINE=1
 export TRELLIS_GENERATION_MAX_WORKERS=4  # 与 TRELLIS Worker GPU 数一致，避免 OOM
+export VLN_MODE=true                  # 默认 true：面向 VLN 的精简场景（详见 §11）
 ```
+
+> **面向 VLN 的精简生成（默认开启）**：`VLN_MODE=true` 时只生成大件、可指代的地标家具 + 少量显著物体，不再"填满每个货架/桌面"，可显著减少 TRELLIS 生成物体数、大幅加速，并保持地面通行空间。详见 §11。
 
 ---
 
@@ -322,7 +325,7 @@ python pack_scene_to_zip.py --layout_id <layout_id> --upload_name <layout_id>
 | MatFuse / Pylette 报错 | Flux 模式不应再触发；确认 `MATERIAL_BACKEND=flux` |
 | `max_tokens` 400 错误 | Client 中 `max_tokens` ≤ 32768 |
 | `No response from Qwen3-VL`、0 tool call | 检查 API 模型名、`tool_choice`；thinking 模型需较久等待 |
-| 每步都很慢 | 正常：远程 LLM + Flux 出图 + 每物体 TRELLIS 数分钟；减少物体数量可加速 |
+| 每步都很慢 / 物体太多 | 每个物体都要 TRELLIS 生成（1–5 分钟）。默认已开启 `VLN_MODE=true` 精简物体数（§11）；仍慢可调小 `VLN_MAX_OBJECTS` |
 | TRELLIS `CUDA out of memory` | 单卡只能 1 路生成；用 `TRELLIS_GPU_IDS=4,5,6,7` 起 4 Worker，并设 `TRELLIS_GENERATION_MAX_WORKERS=4` |
 | TRELLIS `Timeout ... 200 seconds` | 队列过长或单卡过载；减并发或加 GPU Worker；单物体生成常需 1–5 分钟 |
 | Server 每次启动 5 分钟 | CLIP/SBERT 冷加载；可保持 Server 进程常驻或后续改懒加载 |
@@ -343,3 +346,32 @@ python pack_scene_to_zip.py --layout_id <layout_id> --upload_name <layout_id>
 | `environment.yaml` | `simgen` Conda 环境定义 |
 
 更细的子模块说明见 `client/README.md`、`server/README.md`、`server/isaacsim/README.md`、`server/flux_server/README.md`。
+
+---
+
+## 11. 面向 VLN 的精简场景生成（VLN_MODE）
+
+**动机**：全流程耗时 ≈ 物体数量 × 单物体 TRELLIS 生成时间（1–5 分钟/物体）。默认的居家真实感 prompt 会要求"每个货架 >5 件、每个桌面 ≥2 件"，导致小物件爆炸、生成极慢。面向 **VLN（视觉语言导航）** 的场景其实只需要**可通行空间 + 可用语言指代的大件地标家具**，不需要堆满小物。
+
+**开关**（`server/constants.py` 与 `client/client_generation_room_desc.py` 共用，默认开启）：
+
+```bash
+export VLN_MODE=true               # 开启精简模式（默认）；=false 回退到原"填满真实感"行为
+export VLN_MAX_OBJECTS=12          # 单房间物体提案总数上限
+export VLN_MAX_ONTOP_PER_SURFACE=1 # 每个家具表面最多摆几个显著物体（0 = 表面不放小物）
+```
+
+启动生成时会由 Client 自动把这几个变量转发给 Server 子进程，无需重复 export。
+
+**开启后的行为变化**：
+
+| 环节 | 默认 (`VLN_MODE=true`) | 关闭 (`VLN_MODE=false`) |
+|------|------------------------|--------------------------|
+| 场景需求提案数 | 约 8–`VLN_MAX_OBJECTS` 个地标物 | ≥20 个，含大量小物 |
+| 货架/桌面 | 保持整洁，每表面 ≤`VLN_MAX_ONTOP_PER_SURFACE` | 货架 >5 件、每表面 ≥2 件 |
+| 代码兜底裁剪 | 超限提案自动裁掉 | 不裁剪 |
+| Client 放置轮数 `max_tool_calls` | 8 | 15 |
+| 完成判据 | 地标家具齐全 + 地面可通行即停 | 填满所有表面才停 |
+
+**想更快**：把 `VLN_MAX_OBJECTS` 调小（如 6–8），并设 `VLN_MAX_ONTOP_PER_SURFACE=0`。
+**想更丰富**：调大 `VLN_MAX_OBJECTS`，或直接 `VLN_MODE=false` 回退原行为。

@@ -14,13 +14,14 @@
 # limitations under the License.
 import json
 import os
+import sys
 import time
 import random
 import threading
 from datetime import datetime
 from key import ANTHROPIC_API_KEY, API_TOKEN, API_URL_DICT, MODEL_DICT
 import anthropic
-from constants import SERVER_ROOT_DIR
+from constants import SERVER_ROOT_DIR, LLM_REQUEST_TIMEOUT
 try:
     from openai import OpenAI
 except ImportError:
@@ -429,6 +430,29 @@ def log_qwen_call(
         print(f"Warning: Failed to log Qwen VLM call to {log_file}: {str(e)}")
 
 
+def _summarize_messages_for_log(messages, max_len=140):
+    """Build a short one-line preview of the last user text in `messages`.
+
+    Used only for logging so a hanging LLM call can be traced to its step.
+    """
+    try:
+        last_text = ""
+        for msg in messages:
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(content, str):
+                last_text = content
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        last_text = item.get("text", "")
+        preview = " ".join(last_text.split())
+        if len(preview) > max_len:
+            preview = preview[:max_len] + "..."
+        return f"msgs={len(messages)} last='{preview}'"
+    except Exception:
+        return f"msgs={len(messages) if hasattr(messages, '__len__') else '?'}"
+
+
 def call_vlm(
     vlm_type, 
     model,
@@ -460,18 +484,43 @@ def call_vlm(
 
     model = MODEL_DICT[vlm_type]
 
-    if vlm_type == "claude":
-        return _call_claude_with_retry(
-            model, max_tokens, temperature, messages, thinking,
-            max_retries, retry_base_delay, retry_max_delay
+    # Log which LLM step is starting so a hang is attributable to a specific
+    # call. The last "[LLM] calling ..." line without a matching "returned"
+    # line pinpoints exactly where the pipeline is stuck.
+    preview = _summarize_messages_for_log(messages)
+    start_ts = time.time()
+    print(
+        f"⏳ [LLM] calling {vlm_type}/{model} "
+        f"(max_tokens={max_tokens}, timeout={LLM_REQUEST_TIMEOUT}s) | {preview}",
+        file=sys.stderr, flush=True,
+    )
+
+    try:
+        if vlm_type == "claude":
+            result = _call_claude_with_retry(
+                model, max_tokens, temperature, messages, thinking,
+                max_retries, retry_base_delay, retry_max_delay
+            )
+        elif vlm_type in ["qwen", "openai", "glmv"]:
+            result = _call_openai_with_retry(
+                vlm_type, model, max_tokens, temperature, messages, thinking,
+                max_retries, retry_base_delay, retry_max_delay
+            )
+        else:
+            raise ValueError(f"Invalid VLM type: {vlm_type}")
+    except Exception as e:
+        print(
+            f"❌ [LLM] {vlm_type}/{model} FAILED after {time.time() - start_ts:.1f}s: "
+            f"{type(e).__name__}: {e}",
+            file=sys.stderr, flush=True,
         )
-    elif vlm_type in ["qwen", "openai", "glmv"]:
-        return _call_openai_with_retry(
-            vlm_type, model, max_tokens, temperature, messages, thinking,
-            max_retries, retry_base_delay, retry_max_delay
-        )
-    else:
-        raise ValueError(f"Invalid VLM type: {vlm_type}")
+        raise
+
+    print(
+        f"✅ [LLM] {vlm_type}/{model} returned in {time.time() - start_ts:.1f}s",
+        file=sys.stderr, flush=True,
+    )
+    return result
 
 @retry_with_backoff(max_retries=3, base_delay=1.0, max_delay=60.0)
 def _call_claude_api(client, model, max_tokens, temperature, messages, thinking=None):
@@ -507,7 +556,14 @@ def _call_claude_with_retry(
     max_retries, retry_base_delay, retry_max_delay
 ):
     """Call Claude API with retry logic."""
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    # Explicit timeout so a stalled gateway fails fast and our backoff retry
+    # kicks in; max_retries=0 disables the SDK's own silent retries so retries
+    # are handled (and logged) by retry_with_backoff only.
+    client = anthropic.Anthropic(
+        api_key=ANTHROPIC_API_KEY,
+        timeout=LLM_REQUEST_TIMEOUT,
+        max_retries=0,
+    )
     
     # Import here to avoid circular import
     from layout import get_mcp_init_id
@@ -545,9 +601,14 @@ def _call_openai_with_retry(
     if OpenAI is None:
         raise ImportError("OpenAI library is not installed. Cannot use Qwen.")
     
+    # Explicit timeout so a stalled gateway fails fast and our backoff retry
+    # kicks in; max_retries=0 disables the SDK's own silent retries so retries
+    # are handled (and logged) by retry_with_backoff only.
     client = OpenAI(
         api_key=API_TOKEN,
-        base_url=API_URL_DICT[vlm_type]
+        base_url=API_URL_DICT[vlm_type],
+        timeout=LLM_REQUEST_TIMEOUT,
+        max_retries=0,
     )
     
     # Import here to avoid circular import
